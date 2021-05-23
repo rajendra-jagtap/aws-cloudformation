@@ -215,7 +215,7 @@ Outputs:
     Description: A reference to the created VPC
     Value: !Ref VPC
     Export:
-      Name: VPCID
+      Name: 'VPC'
 
   PublicSubnets:
     Description: A list of the public subnets

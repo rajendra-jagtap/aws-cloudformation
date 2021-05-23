@@ -15,32 +15,32 @@ Parameters:
   LatestAmiId:
     Description: Region specific image from the Parameter Store
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'           
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'              
   
-  LaunchTemplateVersionNumber:
+  PublicSubnets:
     Type: String
 
 Resources:
-  myStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: https://github.com/rajendra-jagtap/aws-cloudformation/blob/master/network.yaml
 
   SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow http to client host
-      VpcId:
-        - !ImportValue VPCID
+      VpcId: !ImportValue 'VPC'  
       SecurityGroupIngress:
       - IpProtocol: tcp
         FromPort: 80
         ToPort: 80
         CidrIp: 0.0.0.0/0
-      SecurityGroupEgress:
+      SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: 80
-        ToPort: 80
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0    
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        FromPort: 0
+        ToPort: 0
         CidrIp: 0.0.0.0/0
 
   WebserverLaunchTemplate:
@@ -50,7 +50,8 @@ Resources:
         ImageId: !Ref LatestAmiId
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyName
-        SecurityGroupIds: !Ref SecurityGroup
+        SecurityGroupIds: 
+          - !Ref SecurityGroup
 
   WebServerGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -60,6 +61,6 @@ Resources:
       DesiredCapacity: '1'
       LaunchTemplate:
         LaunchTemplateId: !Ref WebserverLaunchTemplate
-        Version: !Ref LaunchTemplateVersionNumber
+        Version: !GetAtt WebserverLaunchTemplate.LatestVersionNumber
       VPCZoneIdentifier: 
         - !ImportValue PublicSubnets     
