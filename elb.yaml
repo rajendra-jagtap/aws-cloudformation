@@ -1,0 +1,56 @@
+Resources:            
+    ELBSecurityGroup:
+        Type: "AWS::EC2::SecurityGroup"
+        Properties:
+            GroupDescription: "security group for ELB"
+            GroupName: "Webserver-ELB-SG"
+            Tags: 
+              - 
+                Key: "Name"
+                Value: "Webserver-ELB-SG"
+            VpcId: !ImportValue 'VPC'
+            SecurityGroupIngress: 
+              - 
+                CidrIp: "0.0.0.0/0"
+                FromPort: 80
+                IpProtocol: "tcp"
+                ToPort: 80
+              - 
+                CidrIp: "0.0.0.0/0"
+                FromPort: 443
+                IpProtocol: "tcp"
+                ToPort: 443
+
+
+    WebLoadBalancer:
+        Type: AWS::ElasticLoadBalancing::LoadBalancer
+        Properties:
+            CrossZone: true
+            Subnets: 
+              - !ImportValue 'PublicSubnet1'
+              - !ImportValue 'PublicSubnet2' 
+            SecurityGroups: 
+              - !Ref ELBSecurityGroup 
+            Listeners:
+            - InstancePort: '80'
+              LoadBalancerPort: '80'
+              Protocol: HTTP
+            HealthCheck:
+              Target: HTTP:80/
+              HealthyThreshold: '2'
+              UnhealthyThreshold: '3'
+              Interval: '10'
+              Timeout: '5'
+            Policies:
+            - PolicyName: My-SSLNegotiation-Policy
+              PolicyType: SSLNegotiationPolicyType
+              Attributes:
+              - Name: Reference-Security-Policy
+                Value: ELBSecurityPolicy-TLS-1-2-2017-01
+
+Outputs:
+    WebLoadBalancer:
+        Description: A reference to the created VPC
+        Value: !Ref WebLoadBalancer
+        Export:
+            Name: 'ELB'                

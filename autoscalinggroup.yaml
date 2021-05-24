@@ -63,4 +63,6 @@ Resources:
         LaunchTemplateId: !Ref WebserverLaunchTemplate
         Version: !GetAtt WebserverLaunchTemplate.LatestVersionNumber
       VPCZoneIdentifier: 
-        - !ImportValue PublicSubnets     
+        - !ImportValue PublicSubnets
+      LoadBalancerNames:
+        - !ImportValue ELB       
