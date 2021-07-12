@@ -60,7 +60,7 @@ Resources:
             Effect: Allow
             Principal:
               AWS:
-                - 'arn:aws:iam::076471753031:user/vipul'
+                - 'arn:aws:iam::xxxxxxxxxxxxx:user/rajendra'
             Resource:
               - !Sub arn:aws:s3:::${BucketName}
               - !Sub arn:aws:s3:::${BucketName}/*    
