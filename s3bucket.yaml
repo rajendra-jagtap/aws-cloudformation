@@ -1,0 +1,68 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Simple S3 Bucket with satisfying secuirty requirements
+
+Parameters:
+
+  BucketName:
+    Type: String
+    Description: The name of the S3 Bucket to create
+
+  Versioning: 
+    Type: String
+    Description: Whether versioning is required for the s3 bucket
+    Default: Suspended
+    AllowedValues: [Enabled, Suspended]   
+
+Metadata:
+
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      BucketName:
+        default: S3 Bucket Name
+
+Resources:
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      #AccessControl: BucketOwnerFullControl
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: !Ref Versioning
+
+
+
+  ####### Bucket Policy ########
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          -
+            Sid: PutObjectAccess
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Effect: Allow
+            Principal:
+              AWS:
+                - 'arn:aws:iam::076471753031:user/vipul'
+            Resource:
+              - !Sub arn:aws:s3:::${BucketName}
+              - !Sub arn:aws:s3:::${BucketName}/*    
+
+  
