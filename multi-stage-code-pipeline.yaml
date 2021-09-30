@@ -1,0 +1,282 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS CloudFormation template to create a Multi Stage CodePipeline to setup validator with cnf-lint
+Parameters:
+  ECRRepositoryName:
+    Type: String
+    Default: cfn-lint
+  CodeCommitBranch:
+    Type: String
+    Default: main
+  CodeBuildProjectName:
+    Type: String
+    Default: ''
+  GithubRepo:
+    Description: Gitub Repository name
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /rajendra/demo-cicd-pipeline/github/repo
+  GithubToken: 
+    Description: Github OAuth Token with full permissions on admin:repo_hook and repo
+    Type: AWS::SSM::Parameter::Value<String>
+    NoEcho: true
+    Default: /rajendra/demo-cicd-pipeline/github/token
+  GithubUser:
+    Description: Github user where the repository lives
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /rajendra/demo-cicd-pipeline/github/user
+
+Resources:
+  BuildArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: "Stack"
+          Value: !Ref AWS::StackName
+        - Key: "Project"
+          Value: demo-cicd-codepipeline
+    DeletionPolicy: Retain
+
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref ECRRepositoryName
+      RepositoryPolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CodeBuildAccess
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action:
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchGetImage
+              - ecr:GetAuthorizationToken  
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+        - PolicyName: CodeBuildRequirements
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - codecommit:GitPull
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:*'
+              - Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Effect: Allow
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+        - PolicyName: CodePipelineCodeAndArtifactsS3BucketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:*"
+                Resource: !Sub "arn:aws:s3:::${BuildArtifactsBucket}/*"                     
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+  ImageBuilderServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Policies:
+        - PolicyName: CodeBuildImageBuilder
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - codecommit:GitPull
+                Effect: Allow
+                Resource:
+                  - !Sub 'arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:*'
+              - Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - ecr:*
+                Effect: Allow
+                Resource: '*'
+        - PolicyName: CodePipelineCodeAndArtifactsS3BucketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:*"
+                Resource: !Sub "arn:aws:s3:::${BuildArtifactsBucket}/*"        
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+  ImageBuilder:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: cfn-lint-image-builder-2
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        ComputeType: BUILD_GENERAL1_SMALL
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Sub '${AWS::AccountId}'
+          - Name: AWS_DEFAULT_REGION
+            Type: PLAINTEXT
+            Value: !Sub '${AWS::Region}'
+          - Name: IMAGE_REPO_NAME
+            Type: PLAINTEXT
+            Value: !Ref ECRRepositoryName
+          - Name: BUILD_OUTPUT_BUCKET
+            Value: !Ref BuildArtifactsBucket      
+      Source:
+        Type: CODEPIPELINE
+        #Location: https://github.com/XXXXXXXX/XXXXXX-XXXX.git
+        BuildSpec: Builder-buildspec.yml
+      ServiceRole: !GetAtt ImageBuilderServiceRole.Arn
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref CodeBuildProjectName
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Image: !Join [':', [!GetAtt ImageRepository.RepositoryUri, latest]]
+        ImagePullCredentialsType: CODEBUILD
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+      Source:
+        Type: CODEPIPELINE
+      SourceVersion: !Sub 'refs/heads/${CodeCommitBranch}'
+      ServiceRole: !GetAtt ServiceRole.Arn    
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref BuildArtifactsBucket
+        Type: S3
+      Name: demo-cicd-codepipeline
+      RoleArn: !GetAtt CodePipelineExecutionRole.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceCode
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: "1"
+              Configuration:
+                Owner: !Ref GithubUser
+                Repo: !Ref GithubRepo
+                Branch: main
+                OAuthToken: !Ref GithubToken
+              OutputArtifacts:
+                - Name: SourceCodeAsZip
+              RunOrder: 1
+        - Name: Build1
+          Actions:
+            - Name: CodeBuildImage
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref ImageBuilder
+              InputArtifacts:
+                - Name: SourceCodeAsZip
+              RunOrder: 2        
+        - Name: Build2
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: SourceCodeAsZip
+              OutputArtifacts:
+                - Name: BuildArtifactAsZip
+              RunOrder: 3  
+
+  CodePipelineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "iam:PassRole"
+                  - "lambda:InvokeFunction"
+                  - "lambda:ListFunctions"
+                  - "lambda:InvokeAsyc"
+                Resource: "*"
+        - PolicyName: CodePipelineCodeAndArtifactsS3Bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:*"
+                Resource: !Sub "arn:aws:s3:::${BuildArtifactsBucket}/*"
+        - PolicyName: CodePipelineCodeBuildAndCloudformationAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "codebuild:StartBuild"
+                  - "codebuild:BatchGetBuilds"
+                Resource:
+                  - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${CodeBuildProject}"
+                  - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${ImageBuilder}"
+              - Effect: Allow
+                Action:
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:UpdateStack"
+                  - "cloudformation:CreateChangeSet"
+                  - "cloudformation:ExecuteChangeSet"
+                  - "cloudformation:DeleteChangeSet"
+                  - "cloudformation:DescribeChangeSet"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:ValidateTemplate"
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/demo-cicd-codepipeline*/*"              
+
+
+                
