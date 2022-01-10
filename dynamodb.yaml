@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: "This cloudformation template is to create DynamoDB table with data backup and rollback capability"
+
+Parameters:
+  HashKeyElementName:
+    Description: HashType PrimaryKey Name
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9]*'
+    MinLength: '1'
+    MaxLength: '2048'
+    ConstraintDescription: must contain only alphanumberic characters
+  HashKeyElementType:
+    Description: HashType PrimaryKey Type
+    Type: String
+    Default: S
+    AllowedPattern: '[S|N]'
+    MinLength: '1'
+    MaxLength: '1'
+    ConstraintDescription: must be either S or N
+  ReadCapacityUnits:
+    Description: Provisioned read throughput
+    Type: Number
+    Default: '5'
+    MinValue: '5'
+    MaxValue: '10000'
+    ConstraintDescription: must be between 5 and 10000
+  WriteCapacityUnits:
+    Description: Provisioned write throughput
+    Type: Number
+    Default: '5'
+    MinValue: '5'
+    MaxValue: '10000'
+    ConstraintDescription: must be between 5 and 10000
+  BackupPlanName:
+    Description: Enter the name of the backup plan
+    Type: String
+    Default: DynamoDBBackup
+  CronExpression:    
+    Description: Enter the cron expression for your backup plan   
+    Type: String    
+    Default: "cron(0 0 ? * * *)"
+    #Default: "cron(* * ? * * *)"       
+  Retention:    
+    Description: This value will identify how many days your backup will be expired after    
+    Type: String    
+    Default: 31    
+
+Resources:
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: !Ref 'HashKeyElementName'
+        AttributeType: !Ref 'HashKeyElementType'
+      KeySchema:
+      - AttributeName: !Ref 'HashKeyElementName'
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: !Ref 'ReadCapacityUnits'
+        WriteCapacityUnits: !Ref 'WriteCapacityUnits'
+      TableName: "test-dynamodb-table" 
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: "true"
+      Tags:
+      - Key: "backup-plan"
+        Value: !Sub ${BackupPlanName}-${Retention}days-daily     
+
+  BackupRole:    
+    Type: 'AWS::IAM::Role'    
+    Properties:    
+      RoleName: DynamoDBBackupRole    
+      AssumeRolePolicyDocument:    
+        Version: 2012-10-17    
+        Statement:    
+          - Effect: Allow    
+            Principal:    
+              Service:    
+                - backup.amazonaws.com    
+            Action:    
+              - 'sts:AssumeRole'    
+      ManagedPolicyArns:    
+        - "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"    
+            
+  BackupVault:    
+    Type: "AWS::Backup::BackupVault"    
+    Properties:    
+      BackupVaultName: !Sub ${BackupPlanName}-BackupVault    
+      AccessPolicy:     
+        Version: '2012-10-17'    
+        Statement:    
+        -    
+            Sid: 'Vault-Access-Policy'    
+            Effect: Deny    
+            Principal: "*"    
+            Action: "backup:DeleteRecoveryPoint"    
+            Resource:    
+              - "*"
+    DependsOn: DynamoDBTable
+
+  BackupPlan:    
+    Type: "AWS::Backup::BackupPlan"    
+    Properties:    
+      BackupPlan:    
+        BackupPlanName: !Ref BackupPlanName    
+        BackupPlanRule:    
+          -    
+            RuleName: !Sub ${BackupPlanName}-BackupRule    
+            TargetBackupVault: !Ref BackupVault    
+            ScheduleExpression: !Ref CronExpression    
+            Lifecycle:    
+              DeleteAfterDays: !Ref Retention    
+    DependsOn: BackupVault    
+            
+  TagBasedBackupSelection:    
+    Type: "AWS::Backup::BackupSelection"    
+    Properties:    
+      BackupSelection:    
+        SelectionName: "TagBasedBackupSelection-01"    
+        IamRoleArn:  !GetAtt BackupRole.Arn     
+        ListOfTags:    
+         -    
+           ConditionType: "STRINGEQUALS"    
+           ConditionKey: "backup-plan"     
+           ConditionValue: !Sub ${BackupPlanName}-${Retention}days-daily    
+      BackupPlanId: !Ref BackupPlan    
+    DependsOn: BackupPlan 
+
+Outputs:
+  TableName:
+    Value: !Ref 'DynamoDBTable'
+    Description: Table name of the newly created DynamoDB table
