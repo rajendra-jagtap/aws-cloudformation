@@ -1,0 +1,20 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation template to create RDS replica of existing RDS.'
+Parameters:
+  MasterDB:
+    Description: The identifier of source DB
+    Type: String
+  DBInstanceClass:
+    Description: The database instance type
+    Type: String
+    Default: db.t3.small
+
+Resources:
+  ReplicaDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      SourceDBInstanceIdentifier: !Ref 'MasterDB'
+      DBInstanceClass: !Ref 'DBInstanceClass'
+      Tags:
+      - Key: Name
+        Value: Read Replica Database
