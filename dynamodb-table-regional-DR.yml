@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "This template is to create dynamodb table, configure backup through AWS backup and copy backup in us-west-2 region, so that we can use that backup in case of regional DR"
+Resources:
+    DynamoDBTable:
+        Type: "AWS::DynamoDB::Table"
+        Properties:
+            AttributeDefinitions: 
+              - 
+                AttributeName: "1"
+                AttributeType: "S"
+            TableName: "test-table"
+            KeySchema: 
+              - 
+                AttributeName: "1"
+                KeyType: "HASH"
+            ProvisionedThroughput: 
+                ReadCapacityUnits: 1
+                WriteCapacityUnits: 1
+
+    BackupBackupVault:
+        Type: "AWS::Backup::BackupVault"
+        Properties:
+            BackupVaultName: "dynamodb-backup-vault"
+            EncryptionKeyArn: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/xxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+    BackupBackupPlan:
+        Type: "AWS::Backup::BackupPlan"
+        Properties:
+            BackupPlan: 
+                BackupPlanName: "dynamodb-backup-plan"
+                BackupPlanRule: 
+                  - 
+                    CompletionWindowMinutes: 10080
+                    Lifecycle: 
+                        DeleteAfterDays: 7
+                    RuleName: "dynamodb-backup-rule"
+                    ScheduleExpression: "cron(40 15 ? * * *)"
+                    StartWindowMinutes: 60
+                    TargetBackupVault: !Ref BackupBackupVault
+                    CopyActions:
+                        -
+                          DestinationBackupVaultArn: arn:aws:backup:us-west-2:${AWS::AccountId}:backup-vault:dynamodb-backup-vault-destination
+                          Lifecycle:
+                            DeleteAfterDays: 7
+
+    BackupBackupSelection:
+        Type: "AWS::Backup::BackupSelection"
+        Properties:
+            BackupPlanId: !Ref BackupBackupPlan
+            BackupSelection: 
+                SelectionName: "dynamodb-table"
+                IamRoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AWSBackupDefaultServiceRole"
+                Resources: 
+                  - "arn:aws:dynamodb:*:*:table/*"
+                Conditions: {}                        
+
