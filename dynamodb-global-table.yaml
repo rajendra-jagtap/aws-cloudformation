@@ -1,0 +1,68 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "This template is to create dynamodb global table along with replica in us-west-2 region and thier backups"
+Resources:
+
+    DynamoDBGlobalTable:
+        Type: "AWS::DynamoDB::GlobalTable"
+        Properties:
+            AttributeDefinitions: 
+              - 
+                AttributeName: "1"
+                AttributeType: "S"
+            TableName: "test-table"
+            KeySchema: 
+              - 
+                AttributeName: "1"
+                KeyType: "HASH"
+            BillingMode: "PAY_PER_REQUEST"
+            StreamSpecification: 
+                StreamViewType: "NEW_AND_OLD_IMAGES"   
+            Replicas: 
+              - 
+                Region: "us-west-2" 
+      
+
+    # ApplicationAutoScalingScalableTarget:
+    #     Type: "AWS::ApplicationAutoScaling::ScalableTarget"
+    #     Properties:
+    #         MaxCapacity: 10
+    #         MinCapacity: 1
+    #         ResourceId: !Sub "table/${DynamoDBGlobalTable}"
+    #         RoleARN: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/dynamodb.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_DynamoDBTable"
+    #         ScalableDimension: "dynamodb:table:ReadCapacityUnits"
+    #         ServiceNamespace: "dynamodb"
+    #         SuspendedState: 
+    #             DynamicScalingInSuspended: false
+    #             DynamicScalingOutSuspended: false
+    #             ScheduledScalingSuspended: false                       
+
+    BackupBackupVault:
+        Type: "AWS::Backup::BackupVault"
+        Properties:
+            BackupVaultName: "dynamodb-backup-vault"
+
+    BackupBackupPlan:
+        Type: "AWS::Backup::BackupPlan"
+        Properties:
+            BackupPlan: 
+                BackupPlanName: "dynamodb-backup-plan"
+                BackupPlanRule: 
+                  - 
+                    CompletionWindowMinutes: 10080
+                    Lifecycle: 
+                        DeleteAfterDays: 7
+                    RuleName: "dynamodb-backup-rule"
+                    ScheduleExpression: "cron(40 15 ? * * *)"
+                    StartWindowMinutes: 60
+                    TargetBackupVault: !Ref BackupBackupVault
+
+    BackupBackupSelection:
+        Type: "AWS::Backup::BackupSelection"
+        Properties:
+            BackupPlanId: !Ref BackupBackupPlan
+            BackupSelection: 
+                SelectionName: "dynamodb-table"
+                IamRoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/service-role/AWSBackupDefaultServiceRole"
+                Resources: 
+                  - "arn:aws:dynamodb:*:*:table/*"
+                Conditions: {}                        
